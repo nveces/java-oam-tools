@@ -30,20 +30,12 @@ V_ADMIN_DIR=$(dirname $0)
 source ${V_ADMIN_DIR}/_functions.sh
 source ${V_ADMIN_DIR}/00-bootstrap.sh
 
-DEFAULT_INTERVAL=5
-interval="${interval:-$DEFAULT_INTERVAL}"
-bootstrap_oam_jcmd "$@"
-
-msg "--- Code Cache Status (L1 Analysis) ---"
-
-# jcmd Compiler.codecache returns a structured, and we capture the CodeCache line:
-# CodeCache: size=245760Kb, used=25181Kb, max_used=26916Kb, free=220577Kb
-CODE_RAW=$($JCMD "$PID" Compiler.codecache 2>/dev/null | sed '1d' | grep "CodeCache")
-
-if [[ -n "$CODE_RAW" ]]; then
+function codeCacheInfo(){
+    local codecache_raw=$1
     # Get the size and used values in KB using regex and text processing
-    c_size=$(echo "$CODE_RAW" | sed -n 's/.*size=\([0-9]*\)Kb.*/\1/p')
-    c_used=$(echo "$CODE_RAW" | sed -n 's/.*used=\([0-9]*\)Kb.*/\1/p')
+    c_size=$(echo "$codecache_raw" | sed -n 's/.*size=\([0-9]*\)Kb.*/\1/p')
+    c_used=$(echo "$codecache_raw" | sed -n 's/.*used=\([0-9]*\)Kb.*/\1/p')
+    c_free=$(echo "$codecache_raw" | sed -n 's/.*free=\([0-9]*\)Kb.*/\1/p')
 
     # Check if we successfully parsed the values
     if [[ -z "$c_size" || -z "$c_used" ]]; then
@@ -58,6 +50,7 @@ if [[ -n "$CODE_RAW" ]]; then
     LABEL_W=25
     msg_kv_padding "Total Capacity" "$((c_size / 1024)) MB" "." $LABEL_W
     msg_kv_padding "Used" "$((c_used / 1024)) MB" "." $LABEL_W
+    msg_kv_padding "Free" "$((c_free / 1024)) MB" "." $LABEL_W
     msg_kv_padding "Usage Percentage" "${percent_used}%" "." $LABEL_W
 
     # --- Analsys for OAM Operations ---
@@ -71,8 +64,26 @@ if [[ -n "$CODE_RAW" ]]; then
     else
         ok_msg "Code Cache health is good (${percent_used}%)."
     fi
-else
+}
+
+DEFAULT_INTERVAL=5
+interval="${interval:-$DEFAULT_INTERVAL}"
+bootstrap_oam_jcmd "$@"
+
+msg "--- Code Cache Status (L1 Analysis) ---"
+# jcmd Compiler.codecache returns a structured, and we capture the CodeCache line:
+# CodeCache: size=245760Kb, used=25181Kb, max_used=26916Kb, free=220577Kb
+CODE_RAW=$($JCMD "$PID" Compiler.codecache 2>/dev/null | sed '1d' | grep "CodeCache")
+
+if [[ -z "$CODE_RAW" ]]; then
     warn "Compiler.codecache command not supported or failed for PID $PID."
+    CODE_RAW=$($JCMD "$PID" VM.info 2>/dev/null  | grep "CodeCache")
+fi
+
+if [[ -n "$CODE_RAW" ]]; then
+    codeCacheInfo "$CODE_RAW"
+else
+    err "Could not retrieve Code Cache metrics for PID $PID."
 fi
 
 
